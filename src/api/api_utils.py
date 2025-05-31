@@ -57,11 +57,10 @@ def posix_timestamp_to_localtime(posix_timestamp: int) -> datetime.datetime:
 
 def handle_response(
     response: typing.Dict,
-    response_code: int,
-    response_body: str,
-    cache_key: str,
-    cache: typing.Dict,
-) -> typing.Union[None, typing.Any]:
+    action_description: str,
+    http_method: str,
+    success_codes: typing.List[int],
+) -> typing.Dict[int, str]:
     """
     Handles the API response.
 
@@ -75,6 +74,13 @@ def handle_response(
     Returns:
         None or the object if found.
     """
+    response_code = (
+        response.response_code if hasattr(response, "response_code") else response_code
+    )
+    if response_code in success_codes:
+        logging.info(
+            f"Action '{action_description}' completed successfully with response code {response_code}."
+        )
     if not response:
         logging.error("Response is None")
         return None

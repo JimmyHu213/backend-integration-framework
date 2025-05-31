@@ -55,13 +55,112 @@ class PaginatedResponse:
     def __init__(self, pr: dict):
         if not pr:
             raise ValueError("Response cannot be None")
+        self.data = pr["data"]  # depends on the API response structure
+        self._page = pr["current_page"]
+        self._first_page = pr["first_page"]
+        self._last_page = pr["last_page"]
+        self._prev_page_url = pr[
+            "prev_page_url"
+        ]  # depends on the API response structure
+        self._next_page_url = pr[
+            "next_page_url"
+        ]  # depends on the API response structure
+
+        self._first_url = pr["first_page_url"]  # depends on the API response structure
+        self._next_url = pr["next_page_url"]  # depends on the API response structure
+
+    def _set_data_from_new_reponse(self, pr: dict):
+        """
+        Sets the data from a new response.
+        Args:
+            pr (dict): The new response data.
+        """
+        if not pr:
+            raise ValueError("Response cannot be None")
         self.data = pr["data"]
         self._page = pr["current_page"]
         self._first_page = pr["first_page"]
         self._last_page = pr["last_page"]
-        self._prev_page = pr["prev_page"]
-        self._next_page = pr["next_page"]
-        self._total = pr["total"]
+        self._prev_page_url = pr["prev_page_url"]
+        self._next_page_url = pr["next_page_url"]
+        self._first_url = pr["first_page_url"]
+        self._next_url = pr["next_page_url"]
+
+    def has_next_page(self) -> bool:
+        """
+        Checks if there is a next page.
+        Returns:
+            bool: True if there is a next page, False otherwise.
+        """
+        return self._page < self._last_page
+
+    def has_prev_page(self) -> bool:
+        """
+        Checks if there is a previous page.
+        Returns:
+            bool: True if there is a previous page, False otherwise.
+        """
+        return self._page < self._first_page
+
+    def go_next_page(self):
+        """
+        Returns the next page number.
+        Returns:
+            int: The next page number.
+        """
+        if self._page >= self._last_page:
+            raise IndexError("No next page available")
+        r = api_get(self._next_page_url)
+        if r.response_code != 200:
+            raise ValueError(
+                f"Failed to get next page: {r.response_code} - {r.response_body}"
+            )
+        json_data = json.loads(r.response_body)
+        self._set_data_from_new_reponse(json_data)
+
+    def go_prev_page(self):
+        """
+        Returns the previous page number.
+        Returns:
+            int: The previous page number.
+        """
+        if self._page <= self._first_page:
+            raise IndexError("No previous page available")
+        r = api_get(self._prev_page_url)
+        if r.response_code != 200:
+            raise ValueError(
+                f"Failed to get previous page: {r.response_code} - {r.response_body}"
+            )
+        json_data = json.loads(r.response_body)
+        self._set_data_from_new_reponse(json_data)
+
+    def go_first_page(self):
+        """
+        Returns the first page number.
+        Returns:
+            int: The first page number.
+        """
+        r = api_get(self._first_url)
+        if r.response_code != 200:
+            raise ValueError(
+                f"Failed to get first page: {r.response_code} - {r.response_body}"
+            )
+        json_data = json.loads(r.response_body)
+        self._set_data_from_new_reponse(json_data)
+
+    def go_last_page(self):
+        """
+        Returns the last page number.
+        Returns:
+            int: The last page number.
+        """
+        r = api_get(self._next_url)
+        if r.response_code != 200:
+            raise ValueError(
+                f"Failed to get last page: {r.response_code} - {r.response_body}"
+            )
+        json_data = json.loads(r.response_body)
+        self._set_data_from_new_reponse(json_data)
 
 
 def __get_headers() -> dict:
@@ -90,31 +189,25 @@ def __call_api(
     Returns:
         ApiResponse: The response from the API.
     """
-    if headers is None:
-        headers = __get_headers()
-    if payload is None:
-        payload = {}
 
-    try:
-        if method == METHOD_GET:
-            response = requests.get(url, headers=headers)
-        elif method == METHOD_POST:
-            response = requests.post(url, headers=headers, json=payload)
-        elif method == METHOD_PUT:
-            response = requests.put(url, headers=headers, json=payload)
-        elif method == METHOD_DELETE:
-            response = requests.delete(url, headers=headers)
-        else:
-            raise ValueError(f"Unsupported HTTP method: {method}")
+    if method == METHOD_GET:
+        response = requests.get(url, headers=headers)
+    elif method == METHOD_POST:
+        response = requests.post(url, headers=headers, json=payload)
+    elif method == METHOD_PUT:
+        response = requests.put(url, headers=headers, json=payload)
+    elif method == METHOD_DELETE:
+        response = requests.delete(url, headers=headers)
+    else:
+        raise ValueError(f"Unsupported HTTP method: {method}")
 
-        logging.debug(
-            f"API call to {url} with method {method} returned status code {response.status_code}"
-        )
+    response_code = response.status_code
+    response_text = response.text
 
-        return ApiResponse(response.status_code, response.text)
-    except requests.RequestException as e:
-        logging.error(f"Request failed: {e}")
-        raise
+    logging.debug(
+        f"API call to {url} with method {method} returned status code {response.status_code}"
+    )
+    return ApiResponse(response_code, response_text)
 
 
 def form_url_endpoint(endpoint: str) -> str:
@@ -128,7 +221,7 @@ def form_url_endpoint(endpoint: str) -> str:
     return f"{config.API_BASE_URL}/{endpoint}"
 
 
-def api_get(endpoint: str, headers: dict = None) -> ApiResponse:
+def api_get(endpoint: str) -> ApiResponse:
     """
     Calls the API with the GET method.
     Args:
@@ -138,10 +231,11 @@ def api_get(endpoint: str, headers: dict = None) -> ApiResponse:
         ApiResponse: The response from the API.
     """
     url = form_url_endpoint(endpoint)
+    headers = __get_headers()
     return __call_api(METHOD_GET, url, headers=headers)
 
 
-def api_post(endpoint: str, payload: dict, headers: dict = None) -> ApiResponse:
+def api_post(endpoint: str, payload: dict) -> ApiResponse:
     """
     Calls the API with the POST method.
     Args:
@@ -152,10 +246,11 @@ def api_post(endpoint: str, payload: dict, headers: dict = None) -> ApiResponse:
         ApiResponse: The response from the API.
     """
     url = form_url_endpoint(endpoint)
+    headers = __get_headers()
     return __call_api(METHOD_POST, url, headers=headers, payload=payload)
 
 
-def api_put(endpoint: str, payload: dict, headers: dict = None) -> ApiResponse:
+def api_put(endpoint: str, payload: dict) -> ApiResponse:
     """
     Calls the API with the PUT method.
     Args:
@@ -166,10 +261,11 @@ def api_put(endpoint: str, payload: dict, headers: dict = None) -> ApiResponse:
         ApiResponse: The response from the API.
     """
     url = form_url_endpoint(endpoint)
+    headers = __get_headers()
     return __call_api(METHOD_PUT, url, headers=headers, payload=payload)
 
 
-def api_delete(endpoint: str, headers: dict = None) -> ApiResponse:
+def api_delete(endpoint: str) -> ApiResponse:
     """
     Calls the API with the DELETE method.
     Args:
@@ -179,4 +275,5 @@ def api_delete(endpoint: str, headers: dict = None) -> ApiResponse:
         ApiResponse: The response from the API.
     """
     url = form_url_endpoint(endpoint)
+    headers = __get_headers()
     return __call_api(METHOD_DELETE, url, headers=headers)
